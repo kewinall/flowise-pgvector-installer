@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+INSTALL_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+export FLOWISE_INSTALL_DIR="$INSTALL_DIR"
+# shellcheck source=scripts/common.sh
+source "$INSTALL_DIR/scripts/common.sh"
+
+usage() {
+  cat <<'EOF'
+用法：flowise-ctl <command> [arguments]
+
+  status                         顯示容器狀態
+  start                          啟動服務
+  stop                           停止服務
+  restart                        重新啟動服務
+  logs [flowise|postgres]        追蹤 Log
+  verify                         驗證 Flowise、PostgreSQL、pgvector
+  reconcile-db                   同步 PostgreSQL 帳號、密碼、資料庫與 pgvector extension
+  reset-rebuild [options]         測試環境用：全部刪掉並重建空白環境（破壞性操作）
+  backup [backup_root]           建立完整備份
+  restore <backup_dir>           還原完整備份（破壞性操作）
+  upgrade-flowise <version>      備份後升級 Flowise，例如 3.1.3
+  pull                           依 .env 版本重新拉取映像
+  vector-info                    顯示 Flowise pgvector 連線欄位
+  secret <ENV_NAME>              顯示指定密碼/金鑰
+  config                         顯示非機敏設定
+  help                           顯示說明
+EOF
+}
+
+need_root
+load_env
+command="${1:-help}"
+shift || true
+
+case "$command" in
+  status)
+    dc ps
+    ;;
+  start)
+    dc up -d
+    ;;
+  stop)
+    dc stop
+    ;;
+  restart)
+    dc restart
+    ;;
+  logs)
+    service="${1:-}"
+    if [[ -n "$service" ]]; then
+      [[ "$service" == "flowise" || "$service" == "postgres" ]] || fatal "服務只可為 flowise 或 postgres。"
+      dc logs -f --tail=200 "$service"
+    else
+      dc logs -f --tail=200
+    fi
+    ;;
+  verify)
+    exec "$INSTALL_DIR/scripts/verify.sh"
+    ;;
+  reconcile-db)
+    exec "$INSTALL_DIR/scripts/reconcile-db.sh"
+    ;;
+  reset-rebuild|clean-rebuild|rebuild-clean)
+    exec "$INSTALL_DIR/scripts/reset-rebuild.sh" "$@"
+    ;;
+  backup)
+    exec "$INSTALL_DIR/scripts/backup.sh" "${1:-$INSTALL_DIR/backups}"
+    ;;
+  restore)
+    exec "$INSTALL_DIR/scripts/restore.sh" "${1:-}"
+    ;;
+  upgrade-flowise)
+    version="${1:-}"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([._-][A-Za-z0-9.-]+)?$ ]] || fatal "版本格式不正確，例如：3.1.3"
+    "$INSTALL_DIR/scripts/backup.sh" "$INSTALL_DIR/backups"
+    sed -i -E "s/^FLOWISE_VERSION=.*/FLOWISE_VERSION=$version/" "$ENV_FILE"
+    export FLOWISE_VERSION="$version"
+    dc pull flowise
+    dc up -d flowise
+    if ! wait_healthy flowise 300; then
+      dc logs --tail=200 flowise
+      fatal "升級後 Flowise 未通過健康檢查。"
+    fi
+    echo "Flowise 已升級到 $version"
+    ;;
+  pull)
+    dc pull
+    ;;
+  vector-info)
+    cat <<EOF
+Flowise Postgres Vector Store 連線設定：
+  Host: postgres
+  Port: 5432
+  Database: $VECTOR_DB_NAME
+  User: $VECTOR_DB_USER
+  Password: 請執行 sudo flowise-ctl secret VECTOR_DB_PASSWORD
+  SSL: false
+EOF
+    ;;
+  secret)
+    key="${1:-}"
+    case "$key" in
+      POSTGRES_ADMIN_PASSWORD|FLOWISE_DB_PASSWORD|VECTOR_DB_PASSWORD|JWT_AUTH_TOKEN_SECRET|JWT_REFRESH_TOKEN_SECRET|EXPRESS_SESSION_SECRET|TOKEN_HASH_SECRET|FLOWISE_SECRETKEY_OVERWRITE)
+        printf '%s\n' "${!key}"
+        ;;
+      *) fatal "不允許或不存在的機敏變數名稱。" ;;
+    esac
+    ;;
+  config)
+    cat <<EOF
+Install directory : $INSTALL_DIR
+Flowise version   : $FLOWISE_VERSION
+pgvector image    : $PGVECTOR_IMAGE_TAG
+Application URL   : $APP_URL
+Bind address      : $FLOWISE_BIND_ADDRESS
+Flowise port      : $FLOWISE_PORT
+Flowise DB        : $FLOWISE_DB_NAME ($FLOWISE_DB_USER)
+Vector DB         : $VECTOR_DB_NAME ($VECTOR_DB_USER)
+Timezone          : $TZ
+EOF
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

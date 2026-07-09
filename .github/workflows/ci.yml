@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck python3-yaml zip
+
+      - name: Run validation
+        run: bash scripts/ci/validate.sh
+
+      - name: Build release package dry run
+        run: bash scripts/ci/package.sh
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowise-pgvector-installer-package
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7

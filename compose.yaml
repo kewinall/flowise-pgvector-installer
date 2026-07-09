@@ -1,0 +1,119 @@
+name: flowise-pgvector
+
+services:
+  postgres:
+    image: pgvector/pgvector:${PGVECTOR_IMAGE_TAG}
+    container_name: flowise-postgres
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DEFAULT_DB}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+      FLOWISE_DB_NAME: ${FLOWISE_DB_NAME}
+      FLOWISE_DB_USER: ${FLOWISE_DB_USER}
+      FLOWISE_DB_PASSWORD: ${FLOWISE_DB_PASSWORD}
+      VECTOR_DB_NAME: ${VECTOR_DB_NAME}
+      VECTOR_DB_USER: ${VECTOR_DB_USER}
+      VECTOR_DB_PASSWORD: ${VECTOR_DB_PASSWORD}
+    volumes:
+      - flowise_pg_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro,Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    shm_size: 512mb
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - flowise_net
+
+  flowise:
+    image: flowiseai/flowise:${FLOWISE_VERSION}
+    container_name: flowise
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ}
+      PORT: 3000
+      APP_URL: ${APP_URL}
+      SECURE_COOKIES: ${SECURE_COOKIES}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      NUMBER_OF_PROXIES: ${NUMBER_OF_PROXIES:-0}
+
+      DATABASE_TYPE: postgres
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${FLOWISE_DB_NAME}
+      DATABASE_USER: ${FLOWISE_DB_USER}
+      DATABASE_PASSWORD: ${FLOWISE_DB_PASSWORD}
+      DATABASE_SSL: "false"
+      DATABASE_REJECT_UNAUTHORIZED: "false"
+
+      SECRETKEY_STORAGE_TYPE: local
+      SECRETKEY_PATH: /root/.flowise
+      FLOWISE_SECRETKEY_OVERWRITE: ${FLOWISE_SECRETKEY_OVERWRITE}
+
+      STORAGE_TYPE: local
+      BLOB_STORAGE_PATH: /root/.flowise/storage
+
+      JWT_AUTH_TOKEN_SECRET: ${JWT_AUTH_TOKEN_SECRET}
+      JWT_REFRESH_TOKEN_SECRET: ${JWT_REFRESH_TOKEN_SECRET}
+      JWT_ISSUER: Flowise
+      JWT_AUDIENCE: Flowise
+      JWT_TOKEN_EXPIRY_IN_MINUTES: 360
+      JWT_REFRESH_TOKEN_EXPIRY_IN_MINUTES: 43200
+      EXPIRE_AUTH_TOKENS_ON_RESTART: "false"
+      EXPRESS_SESSION_SECRET: ${EXPRESS_SESSION_SECRET}
+      TOKEN_HASH_SECRET: ${TOKEN_HASH_SECRET}
+      PASSWORD_RESET_TOKEN_EXPIRY_IN_MINS: 15
+      PASSWORD_SALT_HASH_ROUNDS: 12
+
+      DEBUG: "false"
+      LOG_LEVEL: info
+      LOG_PATH: /root/.flowise/logs
+      LOG_SANITIZE_BODY_FIELDS: password,pwd,pass,secret,token,apikey,api_key,accesstoken,access_token,refreshtoken,refresh_token,clientsecret,client_secret,privatekey,private_key,secretkey,secret_key,auth,authorization,credential,credentials
+      LOG_SANITIZE_HEADER_FIELDS: authorization,x-api-key,x-auth-token,cookie
+
+      FLOWISE_FILE_SIZE_LIMIT: ${FLOWISE_FILE_SIZE_LIMIT}
+      SHOW_COMMUNITY_NODES: ${SHOW_COMMUNITY_NODES}
+      DISABLE_FLOWISE_TELEMETRY: ${DISABLE_FLOWISE_TELEMETRY}
+
+      HTTP_SECURITY_CHECK: "true"
+      PATH_TRAVERSAL_SAFETY: "true"
+      CUSTOM_MCP_SECURITY_CHECK: "true"
+      CUSTOM_MCP_PROTOCOL: sse
+    ports:
+      - "${FLOWISE_BIND_ADDRESS}:${FLOWISE_PORT}:3000"
+    volumes:
+      - flowise_data:/root/.flowise
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 90s
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: /bin/sh -c "sleep 3; flowise start"
+    networks:
+      - flowise_net
+
+volumes:
+  flowise_pg_data:
+    name: flowise_pg_data
+  flowise_data:
+    name: flowise_data
+
+networks:
+  flowise_net:
+    name: flowise_net
+    driver: bridge

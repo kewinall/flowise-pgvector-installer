@@ -1,0 +1,29 @@
+# Runtime secrets and local configuration
+.env
+.env.*
+!.env.example
+!env.template
+
+# Flowise/PostgreSQL runtime data and backups
+backups/
+offline-images/
+*.dump
+*.sql
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.log
+
+# Build/package output
+dist/
+build/
+*.sha256
+SHA256SUMS
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

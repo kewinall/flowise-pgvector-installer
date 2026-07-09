@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without leading v, for example 1.0.4'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck python3-yaml zip
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          echo "$version" > VERSION
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Validate
+        run: bash scripts/ci/validate.sh
+
+      - name: Build package
+        run: VERSION="${{ steps.version.outputs.version }}" bash scripts/ci/package.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowise-pgvector-installer-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Flowise + PostgreSQL + pgvector installer ${GITHUB_REF_NAME}."
