@@ -23,6 +23,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Normalize executable permissions
+        run: |
+          chmod +x \
+            install.sh \
+            uninstall.sh \
+            flowise-ctl \
+            postgres-init/01-init-databases.sh \
+            scripts/common.sh \
+            scripts/backup.sh \
+            scripts/restore.sh \
+            scripts/verify.sh \
+            scripts/reconcile-db.sh \
+            scripts/reset-rebuild.sh \
+            scripts/ci/validate.sh \
+            scripts/ci/package.sh \
+            scripts/ci/no-secret-check.sh
+
       - name: Install validation tools
         run: |
           sudo apt-get update
